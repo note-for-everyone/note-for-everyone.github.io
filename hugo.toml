@@ -1,0 +1,4 @@
+baseURL = 'https://note-for-everyone.github.io/'
+languageCode = 'ko-kr'
+title = '오늘의 노트'
+theme = 'PaperMod'
