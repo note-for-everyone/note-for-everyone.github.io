@@ -89,6 +89,20 @@ def call_gemini(api_key: str, prompt: str) -> str:
             
     raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
 
+def sanitize_toml_frontmatter(content: str) -> str:
+    """Ensures title and description strings in TOML frontmatter are valid."""
+    def fix_string_line(match):
+        key = match.group(1)
+        val = match.group(2).strip("'\"")
+        # Replace internal double quotes
+        val_clean = val.replace('"', '\\"')
+        return f'{key} = "{val_clean}"'
+
+    # Fix title = ... and description = ...
+    content = re.sub(r'^(title)\s*=\s*(.*)$', fix_string_line, content, flags=re.MULTILINE)
+    content = re.sub(r'^(description)\s*=\s*(.*)$', fix_string_line, content, flags=re.MULTILINE)
+    return content
+
 def generate_post():
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -122,13 +136,13 @@ def generate_post():
    설명이나 인사말 등 불필요한 텍스트는 절대 포함하지 마세요.
 
 +++
-title = '여기에 매력적이고 구체적인 글 제목'
+title = "여기에 매력적이고 구체적인 글 제목"
 date = {date_str}
 draft = false
 categories = ['{category}']
 tags = ['태그1', '태그2', '태그3', '태그4']
-description = '글의 핵심 내용을 담은 매력적인 1~2줄 요약'
-slug = 'english-slug-for-url'
+description = "글의 핵심 내용을 담은 매력적인 1~2줄 요약"
+slug = "english-slug-for-url"
 +++
 
 # 제목
@@ -144,6 +158,9 @@ slug = 'english-slug-for-url'
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
     content = content.strip()
+
+    # Sanitize frontmatter
+    content = sanitize_toml_frontmatter(content)
 
     # Extract slug
     slug_match = re.search(r"slug\s*=\s*['\"](.*?)['\"]", content)
