@@ -7,19 +7,15 @@ Automates topic selection, content drafting via Gemini API, and Hugo markdown ge
 import os
 import re
 import glob
+import json
+import time
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 
-try:
-    import google.generativeai as genai
-except ImportError:
-    genai = None
-
-try:
-    from slugify import slugify
-except ImportError:
-    def slugify(text):
-        text = re.sub(r"[^\w\s-]", "", text).strip().lower()
-        return re.sub(r"[-\s]+", "-", text) or "post"
+def slugify(text):
+    text = re.sub(r"[^\w\s-]", "", text).strip().lower()
+    return re.sub(r"[-\s]+", "-", text) or "post"
 
 CATEGORIES = ["개발/IT", "금융/주식", "생활 꿀팁"]
 
@@ -43,19 +39,64 @@ def determine_next_category():
     post_files = glob.glob("content/posts/*.md")
     return CATEGORIES[len(post_files) % len(CATEGORIES)]
 
+def call_gemini(api_key: str, prompt: str) -> str:
+    """Calls Gemini REST API with automated fallback across available models."""
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
+        "gemini-pro-latest"
+    ]
+    
+    last_error = None
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = json.dumps({
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 4096
+            }
+        }).encode("utf-8")
+        
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        for attempt in range(2):
+            try:
+                print(f"[INFO] Gemini API request... (Model: {model}, Attempt: {attempt+1})")
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts = candidates[0]["content"].get("parts", [])
+                        if parts and "text" in parts[0]:
+                            print(f"[OK] Content generated successfully with {model}")
+                            return parts[0]["text"]
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="ignore")
+                print(f"[WARN] Model {model} failed (HTTP {e.code}): {err_body[:150]}")
+                last_error = e
+                if e.code == 503:
+                    time.sleep(2)
+                    continue
+                break
+            except Exception as e:
+                print(f"[WARN] Model {model} failed: {e}")
+                last_error = e
+                break
+            
+    raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
+
 def generate_post():
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is missing.")
-
-    if genai is None:
-        raise ImportError("google-generativeai library is required. Install with: pip install google-generativeai")
-
-    genai.configure(api_key=api_key)
+        raise ValueError("GEMINI_API_KEY environment variable is not set.")
 
     category = determine_next_category()
     existing_titles = get_existing_post_titles()
-    recent_titles_str = ", ".join([f"'{t}'" for t in existing_titles[-10:]]) if existing_titles else "없음"
+    recent_titles_str = ", ".join([f"'{t}'" for t in existing_titles[-15:]]) if existing_titles else "없음"
 
     kst = timezone(timedelta(hours=9))
     now = datetime.now(kst)
@@ -67,13 +108,13 @@ def generate_post():
 이번에 작성할 분야는 [{category}] 카테고리입니다.
 
 [작성 지침]
-1. 주제: 최근 트렌드에 맞고, 검색 수요가 높으며 대중 또는 실무자에게 실질적으로 도움을 주는 유익한 주제 1개를 선정하세요.
+1. 주제: 최근 트렌드에 맞고, 검색 수요가 높으며 독자에게 실질적으로 도움을 주는 유익한 주제 1개를 선정하세요.
 2. 기존에 다룬 주제 목록: [{recent_titles_str}]
-   - 위 목록과 중복되거나 유사한 주제는 절대 피하고, 새로운 주제로 선정하세요.
+   - 위 목록과 중복되거나 유사한 주제는 절대 피하고, 완전히 새로운 주제로 선정하세요.
 3. 어투: 친절하고 신뢰감 있는 전문적인 존댓말(~합니다, ~해보세요, ~입니다)
 4. 본문 구성:
    - 도입부: 이 주제가 왜 중요하고 누구에게 필요한지 흥미 유발
-   - 핵심 내용: 개념 설명 및 비교/정리 표(테이블) 반드시 포함
+   - 핵심 내용: 개념 설명 및 비교/정리 표(Markdown Table) 반드시 포함
    - 실전 팁 & 활용 가이드: 구체적 사례 또는 실천 방법
    - 주의사항 & 핵심 요약 정리
 5. 출력 형식:
@@ -95,12 +136,8 @@ slug = 'english-slug-for-url'
 본문 내용...
 """
 
-    print(f"선택된 카테고리: {category}")
-    print(f"Gemini AI 글 작성 요청 중...")
-
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    content = response.text.strip()
+    print(f"[INFO] Selected category: {category}")
+    content = call_gemini(api_key, prompt).strip()
 
     # Code fence cleanup if wrapped
     if content.startswith("```"):
@@ -121,7 +158,7 @@ slug = 'english-slug-for-url'
     with open(filename, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"새 포스트 파일 저장 성공: {filename}")
+    print(f"[OK] Post file saved successfully: {filename}")
     return filename
 
 if __name__ == "__main__":
