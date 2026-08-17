@@ -2,3 +2,34 @@ baseURL = 'https://note-for-everyone.github.io/'
 languageCode = 'ko-kr'
 title = '오늘의 노트'
 theme = 'PaperMod'
+
+[params]
+  env = 'production'
+  title = '오늘의 노트'
+  description = '모두를 위한 개발/IT, 금융/주식, 생활 꿀팁 노트'
+  author = 'Note for Everyone'
+  defaultTheme = 'auto'
+  ShowReadingTime = true
+  ShowShareButtons = true
+  ShowPostNavLinks = true
+  ShowBreadCrumbs = true
+  ShowCodeCopyButtons = true
+  ShowToc = true
+  TocOpen = false
+
+[menu]
+  [[menu.main]]
+    identifier = "posts"
+    name = "전체 글"
+    url = "/posts/"
+    weight = 10
+  [[menu.main]]
+    identifier = "categories"
+    name = "카테고리"
+    url = "/categories/"
+    weight = 20
+  [[menu.main]]
+    identifier = "tags"
+    name = "태그"
+    url = "/tags/"
+    weight = 30
